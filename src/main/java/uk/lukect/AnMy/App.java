@@ -2,6 +2,7 @@ package uk.lukect.AnMy;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.mongodb.BasicDBObject;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.WriteError;
@@ -10,11 +11,12 @@ import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.InsertManyOptions;
-import com.mongodb.client.model.ReplaceOptions;
 import org.bson.BsonDocument;
-import org.bson.BsonInt64;
 import org.bson.BsonString;
 import org.bson.Document;
+import org.bson.json.JsonMode;
+import org.bson.json.JsonWriterSettings;
+import org.bson.types.ObjectId;
 import twitter4j.Paging;
 import twitter4j.Twitter;
 import twitter4j.TwitterFactory;
@@ -25,6 +27,7 @@ import uk.lukect.AnMy.util.json.UserTypeAdapter;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class App {
 
@@ -57,16 +60,32 @@ public class App {
         tweets.createIndex(Indexes.ascending("place"), new IndexOptions().name("place").sparse(true));
         tweets.createIndex(Indexes.descending("user"));
 
-        var users = twitterDB.getCollection("users");
-        users.createIndex(Indexes.descending("id"), new IndexOptions().name("id").unique(true));
-        users.createIndex(Indexes.descending("createdAt"));
-        users.createIndex(Indexes.ascending("username"));
-        BsonDocument textIndex = new BsonDocument();
+        // $text index for both users and users_history
+        var textIndex = new BsonDocument();
         var textVal = new BsonString("text");
         textIndex.put("displayName", textVal);
         textIndex.put("description", textVal);
         textIndex.put("location", textVal);
+
+        var users = twitterDB.getCollection("users");
+        users.createIndex(Indexes.descending("id"), new IndexOptions().name("id").unique(true)); //only one current for each user id
+        users.createIndex(Indexes.descending("createdAt"));
+        users.createIndex(Indexes.ascending("username"));
         users.createIndex(textIndex);
+
+        var users_history = twitterDB.getCollection("users_history");
+        users_history.createIndex(Indexes.descending("id")); // multiple for each user id because recording history
+        users_history.createIndex(Indexes.descending("createdAt"));
+        users_history.createIndex(Indexes.ascending("username"));
+        users_history.createIndex(textIndex);
+
+        var user_stats = twitterDB.getCollection("user_stats");
+        user_stats.createIndex(Indexes.descending("id"));
+        user_stats.createIndex(Indexes.descending("followers"));
+        user_stats.createIndex(Indexes.descending("following"));
+        user_stats.createIndex(Indexes.descending("likes"));
+        user_stats.createIndex(Indexes.descending("tweets"));
+        user_stats.createIndex(Indexes.descending("listed"));
 
         int total = 0;
         int duplicate_total = 0;
@@ -76,7 +95,31 @@ public class App {
 
             var ux = new uk.lukect.AnMy.types.User(user);
             var ud = Document.parse(ux.toJSON());
-            users.replaceOne(new BsonDocument("id", new BsonInt64(ux.id)), ud, new ReplaceOptions().upsert(true));
+            ud.put("_id", new ObjectId()); // required because replaceOne doesn't force new _id, therefore there will be duplicates in history
+
+            var users_find = users.find(new BasicDBObject("id", ux.id)).limit(1);
+            var users_find_itr = users_find.iterator();
+            var last_user_doc = users_find_itr.tryNext();
+
+            if (last_user_doc == null) {
+                users.insertOne(ud);
+            } else {
+                var last_user = gson.fromJson(bsonToJson(last_user_doc), uk.lukect.AnMy.types.User.class);
+                if (!ux.equals(last_user)) {
+                    users_history.insertOne(last_user_doc);
+                    users.findOneAndDelete(new BasicDBObject("id", ux.id));
+                    users.insertOne(ud);
+                }
+            }
+
+            var last_stat_find = user_stats.find(new BasicDBObject("id", ux.stats.id))
+                    .sort(new BasicDBObject("_id", -1)).limit(1); // https://docs.mongodb.com/manual/reference/bson-types/#std-label-objectid
+            var last_stat_itr = last_stat_find.iterator();
+            var last_stat = last_stat_itr.tryNext();
+
+            if (last_stat == null || Math.abs(getDifferenceInHours(new Date(), last_stat.getObjectId("_id").getDate())) >= 6) {
+                user_stats.insertOne(Document.parse(ux.statsToJSON()));
+            }
 
             int pageSize = MAX_PAGE_SIZE;
 
@@ -156,10 +199,15 @@ public class App {
         mongo.close();
     }
 
-    private static String userToJson(User user) {
-        var obj = gson.toJsonTree(user).getAsJsonObject();
-        obj.remove("status"); // saved in tweets collections anyway
-        return gson.toJson(obj);
+    public static long getDifferenceInHours(Date date1, Date date2) {
+        var diff = date1.getTime() - date2.getTime();
+        return TimeUnit.MILLISECONDS.toHours(diff);
+    }
+
+    private static final JsonWriterSettings JSW = JsonWriterSettings.builder().outputMode(JsonMode.RELAXED).build();
+
+    public static String bsonToJson(Document document) {
+        return document.toJson(JSW);
     }
 
 }

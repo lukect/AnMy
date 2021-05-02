@@ -3,7 +3,9 @@ package uk.lukect.AnMy.types;
 import uk.lukect.AnMy.App;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.Objects;
 
 public class User implements Serializable {
 
@@ -56,8 +58,19 @@ public class User implements Serializable {
         return App.gson.toJson(this);
     }
 
-    public String statsToJSON() {
-        return stats.toJSON();
+    @Override
+    public boolean equals(Object o) { // does not include stats
+        if (this == o) return true;
+        if (!(o instanceof User)) return false;
+        User user = (User) o;
+        return id == user.id && verified == user.verified && isProtected == user.isProtected && defaultProfile == user.defaultProfile && createdAt.equals(user.createdAt) && username.equals(user.username) && Objects.equals(displayName, user.displayName) && Objects.equals(description, user.description) && Objects.equals(location, user.location) && Objects.equals(URL, user.URL) && Objects.equals(profileImageURL, user.profileImageURL) && Objects.equals(profileBannerImageURL, user.profileBannerImageURL) && Arrays.equals(withheldInCountries, user.withheldInCountries);
+    }
+
+    @Override
+    public int hashCode() { // does not include stats
+        int result = Objects.hash(id, createdAt, username, displayName, verified, isProtected, description, location, defaultProfile, URL, profileImageURL, profileBannerImageURL);
+        result = 31 * result + Arrays.hashCode(withheldInCountries);
+        return result;
     }
 
     public static class Stats {
@@ -82,10 +95,27 @@ public class User implements Serializable {
             // GSON
         }
 
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof Stats)) return false;
+            Stats stats = (Stats) o;
+            return id == stats.id && followers == stats.followers && following == stats.following && likes == stats.likes && tweets == stats.tweets && listed == stats.listed;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(id, followers, following, likes, tweets, listed);
+        }
+
         public String toJSON() {
             return App.gson.toJson(this);
         }
 
+    }
+
+    public String statsToJSON() {
+        return stats.toJSON();
     }
 
 }
