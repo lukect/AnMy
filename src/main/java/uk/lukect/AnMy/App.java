@@ -8,9 +8,7 @@ import com.mongodb.MongoBulkWriteException;
 import com.mongodb.WriteError;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import com.mongodb.client.model.IndexOptions;
-import com.mongodb.client.model.Indexes;
-import com.mongodb.client.model.InsertManyOptions;
+import com.mongodb.client.model.*;
 import org.bson.BsonDocument;
 import org.bson.BsonString;
 import org.bson.Document;
@@ -48,44 +46,58 @@ public class App {
 
         mongo = MongoClients.create();
 
+        // INDEXING START
+
+        var textIndex_options = new IndexOptions().name("text");
+        var createdAt_options = new IndexOptions().name("createdAt");
+        var id_options_unique = new IndexOptions().name("id").unique(true);
+        var id_options = new IndexOptions().name("id");
+
         var twitterDB = mongo.getDatabase("twitter");
         var tweets = twitterDB.getCollection("tweets");
-        tweets.createIndex(Indexes.descending("createdAt"));
-        tweets.createIndex(Indexes.descending("id"), new IndexOptions().name("id").unique(true));
-        tweets.createIndex(Indexes.text("text"));
-        tweets.createIndex(Indexes.descending("favoriteCount"));
-        tweets.createIndex(Indexes.descending("retweetCount"));
-        tweets.createIndex(Indexes.descending("isPossiblySensitive"));
-        tweets.createIndex(Indexes.ascending("lang"));
+        tweets.createIndex(Indexes.descending("createdAt"), createdAt_options);
+        tweets.createIndex(Indexes.descending("id"), id_options_unique);
+        tweets.createIndex(Indexes.text("text"), textIndex_options);
+        tweets.createIndex(Indexes.descending("favoriteCount"), new IndexOptions().name("favoriteCount"));
+        tweets.createIndex(Indexes.descending("retweetCount"), new IndexOptions().name("retweetCount"));
+        tweets.createIndex(Indexes.descending("isPossiblySensitive"), new IndexOptions().name("isPossiblySensitive"));
+        tweets.createIndex(Indexes.ascending("lang"), new IndexOptions().name("lang"));
         tweets.createIndex(Indexes.ascending("place"), new IndexOptions().name("place").sparse(true));
-        tweets.createIndex(Indexes.descending("user"));
+        tweets.createIndex(Indexes.descending("user"), new IndexOptions().name("user"));
 
         // $text index for both users and users_history
         var textIndex = new BsonDocument();
         var textVal = new BsonString("text");
+        textIndex.put("username", textVal);
         textIndex.put("displayName", textVal);
         textIndex.put("description", textVal);
         textIndex.put("location", textVal);
 
+        // username index.
+        var username_index = new IndexOptions().name("username")
+                .collation(Collation.builder().locale("en").collationStrength(CollationStrength.PRIMARY).build());
+
         var users = twitterDB.getCollection("users");
-        users.createIndex(Indexes.descending("id"), new IndexOptions().name("id").unique(true)); //only one current for each user id
-        users.createIndex(Indexes.descending("createdAt"));
-        users.createIndex(Indexes.ascending("username"));
-        users.createIndex(textIndex);
+        users.createIndex(Indexes.descending("id"), id_options_unique); //only one current for each user id
+        users.createIndex(Indexes.descending("createdAt"), createdAt_options);
+        users.createIndex(Indexes.ascending("username"), username_index);
+        users.createIndex(textIndex, textIndex_options);
 
         var users_history = twitterDB.getCollection("users_history");
-        users_history.createIndex(Indexes.descending("id")); // multiple for each user id because recording history
-        users_history.createIndex(Indexes.descending("createdAt"));
-        users_history.createIndex(Indexes.ascending("username"));
-        users_history.createIndex(textIndex);
+        users_history.createIndex(Indexes.descending("id"), id_options); // multiple for each user id because recording history
+        users_history.createIndex(Indexes.descending("createdAt"), createdAt_options);
+        users_history.createIndex(Indexes.ascending("username"), username_index);
+        users_history.createIndex(textIndex, textIndex_options);
 
         var user_stats = twitterDB.getCollection("user_stats");
-        user_stats.createIndex(Indexes.descending("id"));
-        user_stats.createIndex(Indexes.descending("followers"));
-        user_stats.createIndex(Indexes.descending("following"));
-        user_stats.createIndex(Indexes.descending("likes"));
-        user_stats.createIndex(Indexes.descending("tweets"));
-        user_stats.createIndex(Indexes.descending("listed"));
+        user_stats.createIndex(Indexes.descending("id"), id_options);
+        user_stats.createIndex(Indexes.descending("followers"), new IndexOptions().name("followers"));
+        user_stats.createIndex(Indexes.descending("following"), new IndexOptions().name("following"));
+        user_stats.createIndex(Indexes.descending("likes"), new IndexOptions().name("likes"));
+        user_stats.createIndex(Indexes.descending("tweets"), new IndexOptions().name("tweets"));
+        user_stats.createIndex(Indexes.descending("listed"), new IndexOptions().name("listed"));
+
+        // INDEXING END
 
         int total = 0;
         int duplicate_total = 0;
